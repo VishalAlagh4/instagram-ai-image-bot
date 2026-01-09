@@ -1,7 +1,7 @@
 import os
 import requests
 from PIL import Image, ImageDraw
-import google.generativeai as genai
+from google import genai
 
 # ---------------- CONFIG ----------------
 TOPICS = [
@@ -13,22 +13,34 @@ TOPICS = [
 OUTPUT_DIR = "output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# ---------------- GEMINI SETUP ----------------
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-model = genai.GenerativeModel("gemini-1.5-flash")
+# ---------------- GEMINI SETUP (NEW SDK) ----------------
+client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
 def generate_image_prompt(topic):
-    response = model.generate_content(
-        f"Create a minimal flat lay Instagram food photography prompt for: {topic}. No text in image."
+    response = client.models.generate_content(
+        model="gemini-1.5-flash",
+        contents=f"""
+Create a minimal flat lay Instagram food photography prompt.
+
+Topic: {topic}
+
+Rules:
+- Clean white or pastel background
+- Soft natural lighting
+- Professional food photography
+- No text in image
+"""
     )
     return response.text.strip()
 
 def generate_nutrition_text(topic):
-    response = model.generate_content(
-        f"""
+    response = client.models.generate_content(
+        model="gemini-1.5-flash",
+        contents=f"""
 Write short Instagram nutrition content.
 
 Topic: {topic}
+
 Format:
 Title
 • Point 1
@@ -43,19 +55,37 @@ HF_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusi
 HEADERS = {"Authorization": f"Bearer {os.environ['HF_TOKEN']}"}
 
 def generate_image(prompt, path):
-    r = requests.post(HF_URL, headers=HEADERS, json={"inputs": prompt}, timeout=60)
+    r = requests.post(
+        HF_URL,
+        headers=HEADERS,
+        json={"inputs": prompt},
+        timeout=120  # important for cold start
+    )
+
+    if r.headers.get("content-type") != "image/png":
+        raise RuntimeError("Hugging Face did not return an image.")
+
     with open(path, "wb") as f:
         f.write(r.content)
 
 def format_and_overlay(image_path, text, out_path):
-    img = Image.open(image_path).resize((1080, 1080))
+    img = Image.open(image_path).convert("RGB").resize((1080, 1080))
     draw = ImageDraw.Draw(img)
-    draw.multiline_text((40, 720), text, fill="black", spacing=10)
+
+    draw.multiline_text(
+        (40, 720),
+        text,
+        fill="black",
+        spacing=12
+    )
+
     img.save(out_path)
 
 # ---------------- PIPELINE ----------------
 def run():
     for idx, topic in enumerate(TOPICS):
+        print(f"Processing: {topic}")
+
         prompt = generate_image_prompt(topic)
         text = generate_nutrition_text(topic)
 
