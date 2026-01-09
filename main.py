@@ -1,5 +1,7 @@
 import os
 import requests
+import base64
+import io
 from PIL import Image, ImageDraw
 import google.generativeai as genai
 
@@ -15,7 +17,6 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # ---------------- GEMINI SETUP ----------------
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-# ✅ Use a supported model from your token list
 model = genai.GenerativeModel("gemini-2.5-flash")
 
 def generate_image_prompt(topic):
@@ -37,23 +38,34 @@ def generate_nutrition_text(topic):
     response = model.generate_content(text_prompt)
     return response.text.strip()
 
-# ---------------- IMAGE GENERATION ----------------
-HF_URL = "https://router.huggingface.co"
-HEADERS = {"Authorization": f"Bearer {os.environ['HF_TOKEN']}"}
+# ---------------- STABILITY AI IMAGE GENERATION ----------------
+STABILITY_URL = "https://api.stability.ai/v2beta/stable-image/generate/core"
+STABILITY_HEADERS = {
+    "Authorization": f"Bearer {os.environ['STABILITY_API_KEY']}",
+    "Accept": "application/json"
+}
 
 def generate_image(prompt, path):
-    r = requests.post(
-        HF_URL,
-        headers=HEADERS,
-        json={"inputs": prompt},
-        timeout=120
-    )
+    files = {
+        "prompt": (None, prompt),
+        "output_format": (None, "png"),
+        "model": (None, "stable-diffusion-xl-1024-v1-0")
+    }
 
-    if r.headers.get("content-type") != "image/png":
-        raise RuntimeError(f"Hugging Face did not return an image. Response: {r.text}")
+    r = requests.post(STABILITY_URL, headers=STABILITY_HEADERS, files=files, timeout=120)
+
+    if r.status_code != 200:
+        raise RuntimeError(f"Stability AI failed: {r.status_code} {r.text}")
+
+    data = r.json()
+    if "images" not in data or not data["images"]:
+        raise RuntimeError(f"No image returned: {data}")
+
+    image_base64 = data["images"][0]["base64"]
+    image_bytes = base64.b64decode(image_base64)
 
     with open(path, "wb") as f:
-        f.write(r.content)
+        f.write(image_bytes)
 
 def format_and_overlay(image_path, text, out_path):
     img = Image.open(image_path).convert("RGB").resize((1080, 1080))
