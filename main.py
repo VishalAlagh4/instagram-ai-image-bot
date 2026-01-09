@@ -38,7 +38,7 @@ def generate_nutrition_text(topic):
     return response.text.strip()
 
 # ---------------- IMAGE GENERATION ----------------
-HF_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
+HF_URL = "HF_URL = "https://router.huggingface.co"
 HEADERS = {"Authorization": f"Bearer {os.environ['HF_TOKEN']}"}
 
 def generate_image(prompt, path):
