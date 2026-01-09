@@ -24,7 +24,7 @@ jobs:
       - name: Run AI image pipeline
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          STABILITY_API_KEY: ${{ secrets.STABILITY_API_KEY }}
         run: python main.py
 
       - name: Upload generated images
