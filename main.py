@@ -15,7 +15,8 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # ---------------- GEMINI SETUP ----------------
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-model = genai.GenerativeModel("gemini-pro")  # ✅ Correct model name
+# ✅ Use a supported model from your token list
+model = genai.GenerativeModel("gemini-2.5-flash")
 
 def generate_image_prompt(topic):
     prompt = (
@@ -74,7 +75,10 @@ def run():
 
         try:
             prompt = generate_image_prompt(topic)
+            print("Gemini prompt:", prompt)
+
             text = generate_nutrition_text(topic)
+            print("Gemini text:", text)
 
             raw = f"{OUTPUT_DIR}/raw_{idx}.png"
             final = f"{OUTPUT_DIR}/post_{idx}.png"
