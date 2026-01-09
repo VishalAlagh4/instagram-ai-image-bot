@@ -1,7 +1,7 @@
 import os
 import requests
 from PIL import Image, ImageDraw
-import google.genai as genai
+import google.generativeai as genai
 
 # ---------------- CONFIG ----------------
 TOPICS = [
