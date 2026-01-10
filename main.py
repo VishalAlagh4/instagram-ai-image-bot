@@ -1,184 +1,137 @@
 import os
-import time
+import random
 import textwrap
-import base64
-import io
 import requests
 from PIL import Image, ImageDraw, ImageFont
+import io
 import google.generativeai as genai
 
 # ---------------- CONFIG ----------------
-TOPICS = [
-    "Benefits of soaked almonds",
-    "High protein vegetarian foods",
-    "Foods that improve gut health",
-]
-
 OUTPUT_DIR = "output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Image render settings
-CANVAS_SIZE = (1080, 1080)  # Instagram square
-CAPTION_AREA_Y = 720        # Start Y for caption overlay
-CAPTION_WIDTH = 1000        # Max text width for wrapping
-FONT_PATH = None            # Use default PIL font; set a TTF path if you want custom
-FONT_SIZE = 36
+CANVAS_SIZE = (1080, 1080)
+CAPTION_AREA_Y = 720
+FONT_SIZE_TITLE = 48
+FONT_SIZE_BODY = 36
+FONT_SIZE_FOOTER = 32
 
-# Stability AI settings
-STABILITY_URL = "https://api.stability.ai/v2beta/stable-image/generate/core"
-STABILITY_MODEL = "stable-diffusion-xl-1024-v1-0"
-STABILITY_HEADERS = {
-    "Authorization": f"Bearer {os.environ.get('STABILITY_API_KEY', '')}",
-    "Accept": "application/json",
-}
+# ---------------- TOPIC POOL ----------------
+TOPIC_POOL = [
+    "Benefits of soaked almonds",
+    "High protein vegetarian bowls",
+    "Fermented foods for gut health",
+    "Omega-3 rich seeds and nuts",
+    "Colorful plant-based breakfast ideas",
+    "Foods that boost brain function",
+    "Anti-inflammatory spices",
+    "Hydrating fruits for summer",
+    "Iron-rich vegetarian meals",
+    "Healthy fats for skin glow"
+]
 
-# Gemini setup
+def get_random_topic():
+    return random.choice(TOPIC_POOL)
+
+# ---------------- GEMINI SETUP ----------------
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY", ""))
 model = genai.GenerativeModel("gemini-2.5-flash")
 
-
-# ---------------- GEMINI HELPERS ----------------
 def generate_image_prompt(topic: str) -> str:
     prompt = (
-        "Create a minimal flat lay Instagram food photography prompt. "
+        "Create a high-resolution Instagram food photography prompt. "
         f"Topic: {topic}. "
-        "Clean white background, soft natural lighting, "
-        "professional food photography, sharp focus, high resolution, no text or logos in the image."
+        "Style: 4K camera, ultra focus, editorial composition, natural shadows, clean white background, overhead flat lay. "
+        "Include specific ingredients and visual textures. No text or logos in image."
     )
     response = model.generate_content(prompt)
-    text = (response.text or "").strip()
-    if not text:
-        raise RuntimeError("Gemini returned empty prompt text.")
-    return text
-
+    return (response.text or "").strip()
 
 def generate_nutrition_text(topic: str) -> str:
     text_prompt = (
-        "Write short Instagram nutrition content. "
+        "Write Instagram nutrition content for a food image. "
         f"Topic: {topic}. "
-        "Format: Title, then three bullet points. Keep it concise and positive."
+        "Format: Title centered, then three bullet points with clear spacing. No spelling errors. Keep it informative and engaging."
     )
     response = model.generate_content(text_prompt)
-    text = (response.text or "").strip()
-    if not text:
-        raise RuntimeError("Gemini returned empty caption text.")
-    return text
+    return (response.text or "").strip()
 
+# ---------------- IMAGE GENERATION ----------------
+STABILITY_URL = "https://api.stability.ai/v2beta/stable-image/generate/core"
+STABILITY_HEADERS = {
+    "Authorization": f"Bearer {os.environ['STABILITY_API_KEY']}",
+    "Accept": "application/json"
+}
 
-# ---------------- STABILITY AI IMAGE GENERATION ----------------
-def stability_generate_image(prompt: str, timeout: int = 120) -> bytes:
-    """
-    Calls Stability AI to render an image from a text prompt.
-    Returns raw PNG bytes.
-    Handles both 'image' and 'images' response formats.
-    """
-    if not STABILITY_HEADERS["Authorization"]:
-        raise RuntimeError("Missing STABILITY_API_KEY environment variable.")
-
+def generate_image(prompt: str, path: str):
     files = {
         "prompt": (None, prompt),
         "output_format": (None, "png"),
-        "model": (None, STABILITY_MODEL),
+        "model": (None, "stable-diffusion-xl-1024-v1-0")
     }
 
-    r = requests.post(STABILITY_URL, headers=STABILITY_HEADERS, files=files, timeout=timeout)
-
+    r = requests.post(STABILITY_URL, headers=STABILITY_HEADERS, files=files, timeout=120)
     if r.status_code != 200:
         raise RuntimeError(f"Stability AI failed: {r.status_code} {r.text}")
 
     data = r.json()
-    # Debug preview (trim to avoid huge logs)
-    print("Stability response keys:", list(data.keys()))
-
-    # Prefer 'images' list if present; otherwise fallback to 'image'
-    image_base64 = None
-    if "images" in data and isinstance(data["images"], list) and data["images"]:
-        # Expect objects like {"base64": "..."}
-        first = data["images"][0]
-        image_base64 = first.get("base64")
-    elif "image" in data and isinstance(data["image"], str):
-        image_base64 = data["image"]
-
+    image_base64 = data.get("image") or (data.get("images", [{}])[0].get("base64"))
     if not image_base64:
-        raise RuntimeError(f"No image returned from Stability: {data}")
+        raise RuntimeError(f"No image returned: {data}")
 
-    return base64.b64decode(image_base64)
+    image_bytes = base64.b64decode(image_base64)
+    with open(path, "wb") as f:
+        f.write(image_bytes)
 
-
-def generate_image_with_retry(prompt: str, retries: int = 2, delay: int = 3) -> bytes:
-    """
-    Retry wrapper for Stability image generation to handle transient failures.
-    """
-    last_err = None
-    for attempt in range(1, retries + 2):
-        try:
-            return stability_generate_image(prompt)
-        except Exception as e:
-            last_err = e
-            print(f"[Attempt {attempt}] Stability generation failed: {e}")
-            if attempt <= retries:
-                time.sleep(delay)
-    raise RuntimeError(f"Stability generation failed after retries: {last_err}")
-
-
-# ---------------- IMAGE POST-PROCESSING ----------------
-def format_and_overlay(image_bytes: bytes, text: str) -> Image.Image:
-    """
-    - Loads PNG bytes into PIL
-    - Resizes to Instagram square
-    - Overlays wrapped caption text near the bottom
-    """
-    img = Image.open(io.BytesIO(image_bytes)).convert("RGB").resize(CANVAS_SIZE)
-
+# ---------------- FORMATTING ----------------
+def format_and_overlay(image_path: str, text: str, out_path: str):
+    img = Image.open(image_path).convert("RGB").resize(CANVAS_SIZE)
     draw = ImageDraw.Draw(img)
-    font = ImageFont.load_default() if FONT_PATH is None else ImageFont.truetype(FONT_PATH, FONT_SIZE)
+    font_title = ImageFont.load_default()
+    font_body = ImageFont.load_default()
+    font_footer = ImageFont.load_default()
 
-    # Wrap text to fit caption area
-    wrapped = textwrap.fill(text, width=40)
+    lines = text.split("\n")
+    title = lines[0].strip()
+    bullets = [line.strip("•* ") for line in lines[1:] if line.strip()]
 
-    # Draw caption
-    draw.multiline_text(
-        (40, CAPTION_AREA_Y),
-        wrapped,
-        fill="black",
-        spacing=12,
-        font=font,
-    )
+    # Title
+    title_y = CAPTION_AREA_Y
+    draw.text((CANVAS_SIZE[0] // 2, title_y), title, fill="black", anchor="mm", font=font_title)
 
-    return img
+    # Bullets
+    bullet_y = title_y + 60
+    for bullet in bullets:
+        draw.text((CANVAS_SIZE[0] // 2, bullet_y), f"• {bullet}", fill="black", anchor="mm", font=font_body)
+        bullet_y += 50
 
+    # Footer
+    footer_text = "---- alaghverse ----"
+    draw.text((CANVAS_SIZE[0] // 2, CANVAS_SIZE[1] - 60), footer_text, fill="black", anchor="mm", font=font_footer)
+
+    img.save(out_path)
 
 # ---------------- PIPELINE ----------------
 def run():
-    for idx, topic in enumerate(TOPICS):
-        print(f"\n=== Processing: {topic} ===")
+    topic = get_random_topic()
+    print(f"\n=== Processing: {topic} ===")
 
-        try:
-            # 1) Gemini prompt + caption
-            prompt = generate_image_prompt(topic)
-            print("Gemini prompt:\n", prompt)
+    try:
+        prompt = generate_image_prompt(topic)
+        print("Gemini prompt:\n", prompt)
 
-            caption = generate_nutrition_text(topic)
-            print("Gemini caption:\n", caption)
+        caption = generate_nutrition_text(topic)
+        print("Gemini caption:\n", caption)
 
-            # 2) Stability render
-            raw_png_bytes = generate_image_with_retry(prompt)
+        raw = os.path.join(OUTPUT_DIR, "raw.png")
+        final = os.path.join(OUTPUT_DIR, "post.png")
 
-            # 3) Save raw image
-            raw_path = os.path.join(OUTPUT_DIR, f"raw_{idx}.png")
-            with open(raw_path, "wb") as f:
-                f.write(raw_png_bytes)
+        generate_image(prompt, raw)
+        format_and_overlay(raw, caption, final)
 
-            # 4) Overlay caption and save final
-            final_img = format_and_overlay(raw_png_bytes, caption)
-            final_path = os.path.join(OUTPUT_DIR, f"post_{idx}.png")
-            final_img.save(final_path, format="PNG")
-
-            print("Created:", final_path)
-
-        except Exception as e:
-            print(f"Error processing '{topic}': {e}")
-
+        print("Created:", final)
+    except Exception as e:
+        print(f"Error: {e}")
 
 if __name__ == "__main__":
     run()
