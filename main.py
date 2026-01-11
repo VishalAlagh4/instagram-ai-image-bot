@@ -19,7 +19,7 @@ FONT_SIZE_FOOTER = 32
 
 # ---------------- TOPIC POOL ----------------
 TOPIC_POOL = [
-    "Benefits of soaked almonds",
+    "Benefits of fucking",
     "High protein vegetarian bowls",
     "Fermented foods for gut health",
     "Omega-3 rich seeds and nuts",
