@@ -16,10 +16,11 @@ CAPTION_AREA_Y = 720
 FONT_SIZE_TITLE = 48
 FONT_SIZE_BODY = 36
 FONT_SIZE_FOOTER = 32
+FONT_PATH = "fonts/Inter-Regular.ttf"  # ✅ Add this font file to your repo
 
 # ---------------- TOPIC POOL ----------------
 TOPIC_POOL = [
-    "Benefits of soaked almonds",
+    "Benefits of fucking",
     "High protein vegetarian bowls",
     "Fermented foods for gut health",
     "Omega-3 rich seeds and nuts",
@@ -40,10 +41,10 @@ model = genai.GenerativeModel("gemini-2.5-flash")
 
 def generate_image_prompt(topic: str) -> str:
     prompt = (
-        "Create a high-resolution Instagram food photography prompt. "
-        f"Topic: {topic}. "
-        "Style: 4K camera, ultra focus, editorial composition, natural shadows, clean white background, overhead flat lay. "
-        "Include specific ingredients and visual textures. No text or logos in image."
+        f"Create a high-resolution Instagram food photography prompt. Topic: {topic}. "
+        "Shot with a Sony A7R V + 90mm macro lens, ultra sharp focus, shallow depth of field. "
+        "Editorial overhead flat lay, clean white background, soft natural daylight with long shadows. "
+        "Include specific ingredients and textures. No text or logos."
     )
     response = model.generate_content(prompt)
     return (response.text or "").strip()
@@ -88,22 +89,27 @@ def generate_image(prompt: str, path: str):
 def format_and_overlay(image_path: str, text: str, out_path: str):
     img = Image.open(image_path).convert("RGB").resize(CANVAS_SIZE)
     draw = ImageDraw.Draw(img)
-    font_title = ImageFont.load_default()
-    font_body = ImageFont.load_default()
-    font_footer = ImageFont.load_default()
+
+    font_title = ImageFont.truetype(FONT_PATH, FONT_SIZE_TITLE)
+    font_body = ImageFont.truetype(FONT_PATH, FONT_SIZE_BODY)
+    font_footer = ImageFont.truetype(FONT_PATH, FONT_SIZE_FOOTER)
 
     lines = text.split("\n")
     title = lines[0].strip()
     bullets = [line.strip("•* ") for line in lines[1:] if line.strip()]
 
+    spacing = 12
+    total_height = font_title.getsize(title)[1] + len(bullets) * (font_body.getsize("Test")[1] + spacing) + 60
+    start_y = (CANVAS_SIZE[1] - total_height) // 2
+
     # Title
-    draw.text((CANVAS_SIZE[0] // 2, CAPTION_AREA_Y), title, fill="black", anchor="mm", font=font_title)
+    draw.text((CANVAS_SIZE[0] // 2, start_y), title, fill="black", anchor="mm", font=font_title)
+    y = start_y + font_title.getsize(title)[1] + 30
 
     # Bullets
-    y = CAPTION_AREA_Y + 60
     for bullet in bullets:
         draw.text((CANVAS_SIZE[0] // 2, y), f"• {bullet}", fill="black", anchor="mm", font=font_body)
-        y += 50
+        y += font_body.getsize(bullet)[1] + spacing
 
     # Footer
     footer_text = "---- alaghverse ----"
